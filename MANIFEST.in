@@ -1,0 +1,6 @@
+include LICENSE
+include README.rst
+recursive-include djangomapserver/static *
+recursive-include djangomapserver/templates *
+recursive-include djangomapserver/docs *
+recursive-include djangomapserver/config *
