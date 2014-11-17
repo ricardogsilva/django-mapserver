@@ -2,18 +2,26 @@ from django.contrib import admin
 
 import models
 
+class SpatialiteDataStoreAdmin(admin.ModelAdmin):
+    pass
+
+
+class ShapefileDataStoreAdmin(admin.ModelAdmin):
+    pass
+
+
 class RectObjAdmin(admin.ModelAdmin):
     pass
 
 class MapServerColorAdmin(admin.ModelAdmin):
     pass
 
-class LayerObjInline(admin.StackedInline):
-    model = models.LayerObj
+class MapLayerInline(admin.StackedInline):
+    model = models.MapLayer
     extra = 1
 
 class MapObjAdmin(admin.ModelAdmin):
-    inlines = [LayerObjInline]
+    inlines = [MapLayerInline]
 
 class StyleObjInline(admin.StackedInline):
     model = models.StyleObj
@@ -32,3 +40,5 @@ admin.site.register(models.MapServerColor, MapServerColorAdmin)
 admin.site.register(models.MapObj, MapObjAdmin)
 admin.site.register(models.LayerObj, LayerObjAdmin)
 admin.site.register(models.ClassObj, ClassObjAdmin)
+admin.site.register(models.ShapefileDataStore, ShapefileDataStoreAdmin)
+admin.site.register(models.SpatialiteDataStore, SpatialiteDataStoreAdmin)

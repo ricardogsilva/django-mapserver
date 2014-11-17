@@ -2,16 +2,25 @@
 Django models that align with MapServer"s mapscript API
 """
 
+import os
+
 from django.db import models
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+import django.contrib.gis.gdal.geometries as gdal_geometries
+from django.contrib.gis.gdal import DataSource
+
 import mapscript
+
+STATUS_CHOICES = (
+    (mapscript.MS_OFF, "off"),
+    (mapscript.MS_ON, "on"),
+    (mapscript.MS_DEFAULT, "default")
+)
+SHAPEFILE_EXTENSION = 'shp'
 
 class MapObj(models.Model):
     MAP_SIZE = (800, 600)
-    STATUS_CHOICES = (
-        (mapscript.MS_OFF, "off"),
-        (mapscript.MS_ON, "on"),
-        (mapscript.MS_DEFAULT, "default")
-    )
     IMAGE_TYPE_CHOICES = (
         ("png", "png"),
     )
@@ -27,8 +36,6 @@ class MapObj(models.Model):
     units = models.SmallIntegerField(choices=UNITS_CHOICES, blank=True)
     size = models.CommaSeparatedIntegerField(help_text="Map size in pixel units",
                                              max_length=10)
-    shape_path = models.CharField(max_length=255, help_text="Base filesystem "
-                                  "path to layer data.")
     cell_size = models.FloatField(help_text="Pixel size in map units.",
                                   blank=True, null=True)
     extent = models.ForeignKey("RectObj", help_text="Map's spatial extent.")
@@ -37,6 +44,8 @@ class MapObj(models.Model):
     image_color = models.ForeignKey("MapServerColor",
                                     help_text="Initial map background color.",
                                     null=True, blank=True)
+    layers = models.ManyToManyField("LayerObj", null=True, blank=True,
+                                    through="MapLayer")
     # legend
     # metadata (see what parameters refer to each service)
     # ows_title is the same as the map's name
@@ -76,17 +85,29 @@ class MapObj(models.Model):
 
 
 class LayerObj(models.Model):
-    name = models.CharField(max_length=255)
-    map_obj = models.ForeignKey('MapObj')
-    class_item = models.CharField(
-        max_length=255, 
-        help_text="Item name in attribute table to use for class lookups."
+    LAYER_TYPE_CHOICES = (
+        (mapscript.MS_LAYER_RASTER, "raster"),
+        (mapscript.MS_LAYER_POLYGON, "vector polygon"),
+        (mapscript.MS_LAYER_LINE, "vector line"),
+        (mapscript.MS_LAYER_POINT, "vector point"),
     )
+    name = models.CharField(max_length=255)
+    layer_type = models.SmallIntegerField(choices=LAYER_TYPE_CHOICES)
+    data_store = models.ForeignKey("DataStoreBase")
+    projection = models.CharField(
+        max_length=255, default= "init=epsg:4326",
+        help_text="PROJ4 definition of the layer projection"
+    )
+    extent = models.ForeignKey("RectObj", help_text="Layer's spatial extent.")
     data = models.CharField(max_length=255, help_text="Full filename of the "
                             "spatial data to process.")
+    class_item = models.CharField(
+        max_length=255, 
+        help_text="Item name in attribute table to use for class lookups.",
+        blank=True
+    )
     ows_abstract = models.TextField(blank=True)
     ows_enable_request = models.CharField(max_length=255, default="*")
-    ows_extent = models.ForeignKey("RectObj", help_text="Layer's spatial extent.")
     ows_include_items = models.CharField(max_length=50, default="all",
                                          blank=True)
     gml_include_items = models.CharField(max_length=50, default="all",
@@ -105,7 +126,7 @@ class LayerObj(models.Model):
         layer.status = mapscript.MS_ON
         layer.template = "templates/blank.html"
         layer.dump = mapscript.MS_TRUE
-        layer.setProjection(self.map_obj.projection)
+        #setProjection
         layer_meta = mapscript.hashTableObj()
         layer_meta.set("ows_title", self.name)
         layer_meta.set("ows_srs", self.map_obj.projection)
@@ -116,13 +137,44 @@ class LayerObj(models.Model):
         layer_meta.set("wcs_rangeset_label", "my label")
         layer.metadata = layer_meta
         layer.data = self.data
-        layer.type = mapscript.MS_LAYER_RASTER
-        # add the pallete stuff here
+        layer.type = self.layer_type
         return layer
 
 
     def __unicode__(self):
         return self.name
+
+
+class MapLayer(models.Model):
+    map_obj = models.ForeignKey(MapObj)
+    layer_obj = models.ForeignKey(LayerObj)
+    status = models.SmallIntegerField(choices=STATUS_CHOICES)
+    style = models.ForeignKey("StyleObj", null=True, blank=True)
+
+class DataStoreBase(models.Model):
+
+    def __unicode__(self):
+        try:
+            result = self.spatialitedatastore
+        except self.DoesNotExist:
+            result = self.shapefiledatastore
+        return result
+
+
+class SpatialiteDataStore(DataStoreBase):
+    path = models.CharField(max_length=255, help_text="Path to the Spatialite "
+                            "database file.")
+
+    def __unicode__(self):
+        return "spatialite:{}".format(self.path)
+
+
+class ShapefileDataStore(DataStoreBase):
+    path = models.CharField(max_length=255, help_text="Path to the directory "
+                            "holding shapefiles.")
+
+    def __unicode__(self):
+        return "shapefile:{}".format(self.path)
 
 
 class ClassObj(models.Model):
@@ -167,3 +219,47 @@ class RectObj(models.Model):
     def __unicode__(self):
         return "{}, {}, {}, {}".format(self.min_x, self.max_x, self.min_y,
                                        self.max_y)
+
+def _get_mapserver_geometry(ogr_geometry):
+    geom_map = {
+        mapscript.MS_LAYER_POINT: [],
+        mapscript.MS_LAYER_LINE: ['LineString',],
+        mapscript.MS_LAYER_POLYGON: [],
+    }
+    result = None
+    for ms_geom, ogr_geoms in geom_map.iteritems():
+        if ogr_geometry in ogr_geoms:
+            result = ms_geom
+    return result
+
+# signals
+
+
+# FIXME - Check if the layers are already present in the database before adding
+# FIXME - Check if the extent has already been defined and reuse it
+@receiver(post_save, sender=ShapefileDataStore)
+def find_shapefile_layers(sender, **kwargs):
+    """
+    Scan the path value of the newly created ShapefileDataStore and new layers
+    """
+
+    for dirpath, dirnames, fnames in os.walk(kwargs['instance'].path):
+        for file_ in (f for f in fnames if 
+                os.path.splitext(f) == SHAPEFILE_EXTENSION):
+            file_path = os.path.join(dirpath, file_)
+            ds = DataSource(file_path)
+            ds_layer = ds[0]  # shapefiles only have one layer
+            layer = LayerObj(
+                name = ds_layer.name,
+                layer_type= _get_mapserver_geometry(ds_layer.geom_type.name),
+                data_store=kwargs['instance'].pk,
+                projection=ds_layer.srs.proj4,
+                data=file_path,
+                extent=RectObj(
+                    min_x=ds_layer.extent.min_x,
+                    min_y=ds_layer.extent.min_y,
+                    max_x=ds_layer.extent.max_x,
+                    max_y=ds_layer.extent.max_y
+                )
+            )
+            layer.save()
