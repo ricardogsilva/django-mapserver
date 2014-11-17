@@ -6,6 +6,7 @@ from django.db import models
 import mapscript
 
 class MapObj(models.Model):
+    MAP_SIZE = (800, 600)
     STATUS_CHOICES = (
         (mapscript.MS_OFF, "off"),
         (mapscript.MS_ON, "on"),
@@ -59,6 +60,18 @@ class MapObj(models.Model):
         m.setProjection(self.projection)
         m.shapepath = self.shape_path
         m.units = self.units
+        m.setMetaData("ows_title", self.name)
+        m.setMetaData("ows_onlineresource",
+                      "http://{}{}".format(settings.HOST_NAME, ""))
+        m.setMetaData("ows_srs", self.projection)
+        m.setMetaData("ows_enable_request", "")
+        m.setMetaData("ows_encoding", "utf-8")
+        m.imagetype = "png"
+        m.extent = self.extent.build_rect_obj()
+        m.setSize(*self.MAP_SIZE)
+        m.imageColor = self.image_color.build_color()
+        for la in self.layers:
+            m.insertLayer(la.build_layer())
         return m
 
 
@@ -81,6 +94,32 @@ class LayerObj(models.Model):
     ows_opaque = models.SmallIntegerField(blank=True, null=True)
     # ows_srs will be the same as the corresponing map
     # ows_title is the same as the layer's name
+
+    def build_layer(self):
+        """
+        Build a mapscript LayerObj
+        """
+
+        layer = mapscript.layerObj()
+        layer.name = self.name
+        layer.status = mapscript.MS_ON
+        layer.template = "templates/blank.html"
+        layer.dump = mapscript.MS_TRUE
+        layer.setProjection(self.map_obj.projection)
+        layer_meta = mapscript.hashTableObj()
+        layer_meta.set("ows_title", self.name)
+        layer_meta.set("ows_srs", self.map_obj.projection)
+        layer_meta.set("ows_include_items", "all")
+        layer_meta.set("gml_include_items", "all")
+        layer_meta.set("wcs_label", self.name)
+        layer_meta.set("wcs_rangeset_name", "range 1")
+        layer_meta.set("wcs_rangeset_label", "my label")
+        layer.metadata = layer_meta
+        layer.data = self.data
+        layer.type = mapscript.MS_LAYER_RASTER
+        # add the pallete stuff here
+        return layer
+
 
     def __unicode__(self):
         return self.name
@@ -106,16 +145,24 @@ class MapServerColor(models.Model):
     hex_string = models.CharField(max_length=9, blank=True)
     attribute = models.CharField(max_length=255, blank=True)
 
+    def build_color(self):
+        return mapscript.colorObj(self.red, self.green, self.blue)
+
     def __unicode__(self):
         result = u"RGB({}, {}, {})".format(self.red, self.green,
                                            self.blue)
         return result
+
 
 class RectObj(models.Model):
     max_x = models.FloatField()
     max_y = models.FloatField()
     min_x = models.FloatField()
     min_y = models.FloatField()
+
+    def build_rect_obj(self):
+        return mapscript.rectObj(self.min_x, self.min_y, 
+                                 self.max_x, self.max_y)
 
     def __unicode__(self):
         return "{}, {}, {}, {}".format(self.min_x, self.max_x, self.min_y,
