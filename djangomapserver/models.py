@@ -1,13 +1,14 @@
 """
-Django models that align with MapServer"s mapscript API
+Django models that align with MapServer's mapscript API
 """
 
 import os
 
+from django.core.urlresolvers import reverse
+from django.conf import settings
 from django.db import models
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-import django.contrib.gis.gdal.geometries as gdal_geometries
 from django.contrib.gis.gdal import DataSource
 
 import mapscript
@@ -64,23 +65,27 @@ class MapObj(models.Model):
         Build a mapObj
         """
 
+        uri = reverse("wms_endpoint")
         m = mapscript.mapObj()
         m.name = self.name
         m.setProjection(self.projection)
-        m.shapepath = self.shape_path
+        m.shapepath = ""
         m.units = self.units
         m.setMetaData("ows_title", self.name)
         m.setMetaData("ows_onlineresource",
-                      "http://{}{}".format(settings.HOST_NAME, ""))
-        m.setMetaData("ows_srs", self.projection)
-        m.setMetaData("ows_enable_request", "")
-        m.setMetaData("ows_encoding", "utf-8")
+                      "http://{}{}".format(settings.HOST_NAME, uri))
+        m.setMetaData("wms_srs", self.projection)
+        m.setMetaData("wms_enable_request", self.ows_enable_request)
+        m.setMetaData("wms_encoding", "utf-8")
         m.imagetype = "png"
         m.extent = self.extent.build_rect_obj()
         m.setSize(*self.MAP_SIZE)
-        m.imageColor = self.image_color.build_color()
-        for la in self.layers:
-            m.insertLayer(la.build_layer())
+        if self.image_color is not None:
+            m.imageColor = self.image_color.build_color()
+        else:
+            m.imageColor = mapscript.colorObj(255, 255, 255)
+        for layer in self.layers.all():
+            m.insertLayer(layer.build_layer())
         return m
 
 
@@ -126,20 +131,19 @@ class LayerObj(models.Model):
         layer.status = mapscript.MS_ON
         layer.template = "templates/blank.html"
         layer.dump = mapscript.MS_TRUE
-        #setProjection
+        layer.setProjection(self.projection)
         layer_meta = mapscript.hashTableObj()
-        layer_meta.set("ows_title", self.name)
-        layer_meta.set("ows_srs", self.map_obj.projection)
-        layer_meta.set("ows_include_items", "all")
+        layer_meta.set("wms_title", self.name)
+        layer_meta.set("wms_srs", self.projection)
+        layer_meta.set("wms_include_items", "all")
         layer_meta.set("gml_include_items", "all")
-        layer_meta.set("wcs_label", self.name)
-        layer_meta.set("wcs_rangeset_name", "range 1")
-        layer_meta.set("wcs_rangeset_label", "my label")
+        #layer_meta.set("wcs_label", self.name)
+        #layer_meta.set("wcs_rangeset_name", "range 1")
+        #layer_meta.set("wcs_rangeset_label", "my label")
         layer.metadata = layer_meta
         layer.data = self.data
         layer.type = self.layer_type
         return layer
-
 
     def __unicode__(self):
         return self.name
@@ -233,10 +237,6 @@ def _get_mapserver_geometry(ogr_geometry):
     return result
 
 # signals
-
-
-# FIXME - Check if the layers are already present in the database before adding
-# FIXME - Check if the extent has already been defined and reuse it
 @receiver(post_save, sender=ShapefileDataStore)
 def find_shapefile_layers(sender, **kwargs):
     """
@@ -244,22 +244,25 @@ def find_shapefile_layers(sender, **kwargs):
     """
 
     for dirpath, dirnames, fnames in os.walk(kwargs['instance'].path):
+        print("Analyzing {}".format(dirpath))
         for file_ in (f for f in fnames if 
-                os.path.splitext(f) == SHAPEFILE_EXTENSION):
+                os.path.splitext(f)[-1][1:] == SHAPEFILE_EXTENSION):
+            print("found {}".format(file_))
             file_path = os.path.join(dirpath, file_)
             ds = DataSource(file_path)
             ds_layer = ds[0]  # shapefiles only have one layer
-            layer = LayerObj(
+            extent, created = RectObj.objects.get_or_create(
+                min_x=ds_layer.extent.min_x,
+                min_y=ds_layer.extent.min_y,
+                max_x=ds_layer.extent.max_x,
+                max_y=ds_layer.extent.max_y
+            )
+            layer, created = LayerObj.objects.get_or_create(
                 name = ds_layer.name,
                 layer_type= _get_mapserver_geometry(ds_layer.geom_type.name),
-                data_store=kwargs['instance'].pk,
+                data_store=kwargs['instance'],
                 projection=ds_layer.srs.proj4,
                 data=file_path,
-                extent=RectObj(
-                    min_x=ds_layer.extent.min_x,
-                    min_y=ds_layer.extent.min_y,
-                    max_x=ds_layer.extent.max_x,
-                    max_y=ds_layer.extent.max_y
-                )
+                extent=extent
             )
             layer.save()

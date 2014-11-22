@@ -1,4 +1,5 @@
 from django.http import HttpResponse
+from django.http import Http404
 import mapscript
 
 from giosystemcore.tools.ows import Mapfile
@@ -12,11 +13,16 @@ def wms_endpoint(request, mapfile=None):
     '''
 
     if mapfile is None:
-        m = models.MapFile.objects.all()[0]
+        try:
+            m = models.MapObj.objects.all()[0]
+        except IndexError:
+            raise Http404
     else:
-        m = models.MapFile.objects.get(name=mapfile)
-    layer_names = request.GET('layers')
-    map_obj = ows.create_mapfile(m, layer_names)
+        try:
+            m = models.MapObj.objects.get(name=mapfile)
+        except models.MapObj.DoesNotExist:
+            raise Http404
+    map_obj = m.build_mapfile()
     result, ct = ows.process_request(request, map_obj)
     content_type = ows.get_content_type(ct)
     response = HttpResponse(content_type=content_type)
