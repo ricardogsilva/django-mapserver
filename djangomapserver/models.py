@@ -2,6 +2,8 @@
 Django models that align with MapServer's mapscript API
 """
 
+# TODO - Add a geotiff datastore that is recursive, like the shapefile one
+
 import os
 
 from django.core.urlresolvers import reverse
@@ -10,7 +12,7 @@ from django.db import models
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.contrib.gis.gdal import DataSource
-
+from osgeo import osr
 import mapscript
 
 STATUS_CHOICES = (
@@ -30,9 +32,8 @@ class MapObj(models.Model):
     )
     name = models.CharField(max_length=255, help_text="Unique identifier.")
     status = models.SmallIntegerField(choices=STATUS_CHOICES)
-    projection = models.CharField(
-        max_length=255, default= "init=epsg:4326",
-        help_text="PROJ4 definition of the map projection"
+    projection = models.PositiveSmallIntegerField(
+        default= 4326, help_text="EPSG code of the map projection"
     )
     units = models.SmallIntegerField(choices=UNITS_CHOICES, blank=True)
     size = models.CommaSeparatedIntegerField(help_text="Map size in pixel units",
@@ -57,10 +58,7 @@ class MapObj(models.Model):
     # ows_onlineresource does not need to be editable
     # ows_srs uses the same projection as the map and does not need to be editable
 
-    def __unicode__(self):
-        return self.name
-
-    def build_mapfile(self):
+    def build(self):
         """
         Build a mapObj
         """
@@ -68,25 +66,32 @@ class MapObj(models.Model):
         uri = reverse("wms_endpoint")
         m = mapscript.mapObj()
         m.name = self.name
-        m.setProjection(self.projection)
+        m.setProjection("init=epsg:{}".format(self.projection))
         m.shapepath = ""
         m.units = self.units
         m.setMetaData("ows_title", self.name)
         m.setMetaData("ows_onlineresource",
                       "http://{}{}".format(settings.HOST_NAME, uri))
-        m.setMetaData("wms_srs", self.projection)
+        m.setMetaData("wms_srs", "EPSG:{}".format(self.projection))
         m.setMetaData("wms_enable_request", self.ows_enable_request)
         m.setMetaData("wms_encoding", "utf-8")
         m.imagetype = "png"
-        m.extent = self.extent.build_rect_obj()
+        m.extent = self.extent.build()
         m.setSize(*self.MAP_SIZE)
         if self.image_color is not None:
             m.imageColor = self.image_color.build_color()
         else:
             m.imageColor = mapscript.colorObj(255, 255, 255)
         for layer in self.layers.all():
-            m.insertLayer(layer.build_layer())
+            m.insertLayer(layer.build())
         return m
+
+    def _available_layers(self):
+        return ', '.join((la.name for la in self.layers.all()))
+    available_layers = property(_available_layers)
+
+    def __unicode__(self):
+        return self.name
 
 
 class LayerObj(models.Model):
@@ -99,12 +104,11 @@ class LayerObj(models.Model):
     name = models.CharField(max_length=255)
     layer_type = models.SmallIntegerField(choices=LAYER_TYPE_CHOICES)
     data_store = models.ForeignKey("DataStoreBase")
-    projection = models.CharField(
-        max_length=255, default= "init=epsg:4326",
-        help_text="PROJ4 definition of the layer projection"
+    projection = models.PositiveSmallIntegerField(
+        default= 4326, help_text="EPSG code of the layer projection"
     )
     extent = models.ForeignKey("RectObj", help_text="Layer's spatial extent.")
-    data = models.CharField(max_length=255, help_text="Full filename of the "
+    data = models.CharField(max_length=255, help_text="Full path to the "
                             "spatial data to process.")
     class_item = models.CharField(
         max_length=255, 
@@ -121,7 +125,7 @@ class LayerObj(models.Model):
     # ows_srs will be the same as the corresponing map
     # ows_title is the same as the layer's name
 
-    def build_layer(self):
+    def build(self):
         """
         Build a mapscript LayerObj
         """
@@ -131,18 +135,18 @@ class LayerObj(models.Model):
         layer.status = mapscript.MS_ON
         layer.template = "templates/blank.html"
         layer.dump = mapscript.MS_TRUE
-        layer.setProjection(self.projection)
-        layer_meta = mapscript.hashTableObj()
-        layer_meta.set("wms_title", self.name)
-        layer_meta.set("wms_srs", self.projection)
-        layer_meta.set("wms_include_items", "all")
-        layer_meta.set("gml_include_items", "all")
-        #layer_meta.set("wcs_label", self.name)
-        #layer_meta.set("wcs_rangeset_name", "range 1")
-        #layer_meta.set("wcs_rangeset_label", "my label")
-        layer.metadata = layer_meta
+        layer.setProjection("init=epsg:{}".format(self.projection))
+        layer.metadata.set("wms_title", self.name)
+        layer.metadata.set("wms_srs", "EPSG:{}".format(self.projection))
+        layer.metadata.set("wms_include_items", "all")
+        layer.metadata.set("gml_include_items", "all")
+        #layer.metadata.set("wcs_label", self.name)
+        #layer.metadata.set("wcs_rangeset_name", "range 1")
+        #layer.metadata.set("wcs_rangeset_label", "my label")
         layer.data = self.data
         layer.type = self.layer_type
+        for c in self.classobj_set.all():
+            layer.insertClass(c.build())
         return layer
 
     def __unicode__(self):
@@ -153,16 +157,15 @@ class MapLayer(models.Model):
     map_obj = models.ForeignKey(MapObj)
     layer_obj = models.ForeignKey(LayerObj)
     status = models.SmallIntegerField(choices=STATUS_CHOICES)
-    style = models.ForeignKey("StyleObj", null=True, blank=True)
 
 class DataStoreBase(models.Model):
 
     def __unicode__(self):
         try:
-            result = self.spatialitedatastore
+            ds = self.spatialitedatastore
         except self.DoesNotExist:
-            result = self.shapefiledatastore
-        return result
+            ds = self.shapefiledatastore
+        return ds.__unicode__()
 
 
 class SpatialiteDataStore(DataStoreBase):
@@ -182,16 +185,31 @@ class ShapefileDataStore(DataStoreBase):
 
 
 class ClassObj(models.Model):
+    name = models.CharField(max_length=50)
     layer_obj = models.ForeignKey("LayerObj")
-    expression = models.CharField(max_length=255)
+    expression = models.CharField(max_length=255, blank=True)
+
+    def build(self):
+        cl = mapscript.classObj()
+        cl.name = self.name
+        cl.setExpression(self.expression)
+        for style in self.styleobj_set.all():
+            cl.insertStyle(style.build())
+        return cl
 
     def __unicode__(self):
-        return self.expression
+        return self.name
 
 
 class StyleObj(models.Model):
     class_obj = models.ForeignKey("ClassObj")
     color = models.ForeignKey("MapServerColor")
+
+    def build(self):
+        st = mapscript.styleObj()
+        st.color = self.color.build()
+        # can add more things to style in the future
+        return st
 
 
 class MapServerColor(models.Model):
@@ -201,7 +219,7 @@ class MapServerColor(models.Model):
     hex_string = models.CharField(max_length=9, blank=True)
     attribute = models.CharField(max_length=255, blank=True)
 
-    def build_color(self):
+    def build(self):
         return mapscript.colorObj(self.red, self.green, self.blue)
 
     def __unicode__(self):
@@ -216,7 +234,7 @@ class RectObj(models.Model):
     min_x = models.FloatField()
     min_y = models.FloatField()
 
-    def build_rect_obj(self):
+    def build(self):
         return mapscript.rectObj(self.min_x, self.min_y, 
                                  self.max_x, self.max_y)
 
@@ -257,12 +275,29 @@ def find_shapefile_layers(sender, **kwargs):
                 max_x=ds_layer.extent.max_x,
                 max_y=ds_layer.extent.max_y
             )
+            epsg_code = get_epsg_code(ds_layer)
             layer, created = LayerObj.objects.get_or_create(
                 name = ds_layer.name,
                 layer_type= _get_mapserver_geometry(ds_layer.geom_type.name),
                 data_store=kwargs['instance'],
-                projection=ds_layer.srs.proj4,
+                projection=epsg_code,
                 data=file_path,
                 extent=extent
             )
             layer.save()
+
+def get_epsg_code(dataset):
+    """
+
+    :return:
+    """
+
+    srs = osr.SpatialReference()
+    srs.ImportFromWkt(dataset.srs.wkt)
+    srs.AutoIdentifyEPSG()
+    top_level_elements = ("GEOGCS", "PROJCS")
+    code = None
+    index = 0
+    while code is None and index < len(top_level_elements):
+        code = srs.GetAuthorityCode(top_level_elements[index])
+    return int(code)

@@ -22,18 +22,18 @@ class MapLayerInline(admin.StackedInline):
 
 class MapObjAdmin(admin.ModelAdmin):
     inlines = [MapLayerInline]
+    list_display = ("name", "projection", "available_layers")
 
 class StyleObjInline(admin.StackedInline):
     model = models.StyleObj
 
 class ClassObjAdmin(admin.ModelAdmin):
     inlines = [StyleObjInline]
-
-class ClassObjInline(admin.StackedInline):
-    model = models.ClassObj
+    list_display = ("name", "layer_obj",)
 
 class LayerObjAdmin(admin.ModelAdmin):
-    inlines = [ClassObjInline]
+    list_display = ("name", "projection", "extent", "layer_type",
+                    "data_store")
 
 admin.site.register(models.RectObj, RectObjAdmin)
 admin.site.register(models.MapServerColor, MapServerColorAdmin)

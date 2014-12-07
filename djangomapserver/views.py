@@ -8,9 +8,9 @@ import models
 import ows
 
 def wms_endpoint(request, mapfile=None):
-    '''
+    """
     WMS endpoint.
-    '''
+    """
 
     if mapfile is None:
         try:
@@ -22,7 +22,10 @@ def wms_endpoint(request, mapfile=None):
             m = models.MapObj.objects.get(name=mapfile)
         except models.MapObj.DoesNotExist:
             raise Http404
-    map_obj = m.build_mapfile()
+    print('map name: {}'.format(m.name))
+    print('map projection: {}'.format(m.projection))
+    map_obj = m.build()
+    map_obj.save("/home/ricardo/Desktop/mapfile_teste.map")
     result, ct = ows.process_request(request, map_obj)
     content_type = ows.get_content_type(ct)
     response = HttpResponse(content_type=content_type)
