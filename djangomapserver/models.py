@@ -143,8 +143,10 @@ class LayerObj(models.Model):
         #layer.metadata.set("wcs_label", self.name)
         #layer.metadata.set("wcs_rangeset_name", "range 1")
         #layer.metadata.set("wcs_rangeset_label", "my label")
-        layer.data = self.data
         layer.type = self.layer_type
+        layer.connectiontype = self.data_store.connection_type
+        layer.connection = self.data
+        layer.data = self.name
         for c in self.classobj_set.all():
             layer.insertClass(c.build())
         return layer
@@ -160,6 +162,14 @@ class MapLayer(models.Model):
 
 class DataStoreBase(models.Model):
 
+    @property
+    def connection_type(self):
+        try:
+            ct = self.spatialitedatastore.connection_type
+        except self.DoesNotExist:
+            ct = self.shapefiledatastore.connection_type
+        return ct
+
     def __unicode__(self):
         try:
             ds = self.spatialitedatastore
@@ -171,6 +181,7 @@ class DataStoreBase(models.Model):
 class SpatialiteDataStore(DataStoreBase):
     path = models.CharField(max_length=255, help_text="Path to the Spatialite "
                             "database file.")
+    connection_type = mapscript.MS_OGR
 
     def __unicode__(self):
         return "spatialite:{}".format(self.path)
@@ -179,6 +190,7 @@ class SpatialiteDataStore(DataStoreBase):
 class ShapefileDataStore(DataStoreBase):
     path = models.CharField(max_length=255, help_text="Path to the directory "
                             "holding shapefiles.")
+    connection_type = mapscript.MS_SHAPEFILE
 
     def __unicode__(self):
         return "shapefile:{}".format(self.path)
@@ -245,8 +257,8 @@ class RectObj(models.Model):
 def _get_mapserver_geometry(ogr_geometry):
     geom_map = {
         mapscript.MS_LAYER_POINT: [],
-        mapscript.MS_LAYER_LINE: ['LineString',],
-        mapscript.MS_LAYER_POLYGON: [],
+        mapscript.MS_LAYER_LINE: ["MultiLineString", "LineString",],
+        mapscript.MS_LAYER_POLYGON: ["Polygon", "MultiPolygon"],
     }
     result = None
     for ms_geom, ogr_geoms in geom_map.iteritems():
@@ -269,22 +281,39 @@ def find_shapefile_layers(sender, **kwargs):
             file_path = os.path.join(dirpath, file_)
             ds = DataSource(file_path)
             ds_layer = ds[0]  # shapefiles only have one layer
-            extent, created = RectObj.objects.get_or_create(
-                min_x=ds_layer.extent.min_x,
-                min_y=ds_layer.extent.min_y,
-                max_x=ds_layer.extent.max_x,
-                max_y=ds_layer.extent.max_y
-            )
-            epsg_code = get_epsg_code(ds_layer)
-            layer, created = LayerObj.objects.get_or_create(
-                name = ds_layer.name,
-                layer_type= _get_mapserver_geometry(ds_layer.geom_type.name),
-                data_store=kwargs['instance'],
-                projection=epsg_code,
-                data=file_path,
-                extent=extent
-            )
+            layer = get_layer(ds_layer)
             layer.save()
+
+@receiver(post_save, sender=SpatialiteDataStore)
+def find_spatialite_layers(sender, **kwargs):
+    ds = DataSource(kwargs["instance"].path)
+    for ds_layer in ds:
+        layer = get_layer(ds_layer, kwargs["instance"])
+        layer.save()
+
+def get_layer(ds_layer, data_store):
+    """
+    Get a models.LayerObj from the data in the input ds_layer
+
+    :param ds_layer:
+    :return:
+    """
+    extent, created = RectObj.objects.get_or_create(
+        min_x=ds_layer.extent.min_x,
+        min_y=ds_layer.extent.min_y,
+        max_x=ds_layer.extent.max_x,
+        max_y=ds_layer.extent.max_y
+    )
+    epsg_code = get_epsg_code(ds_layer)
+    layer, created = LayerObj.objects.get_or_create(
+        name = ds_layer.name,
+        layer_type= _get_mapserver_geometry(ds_layer.geom_type.name),
+        data_store=data_store,
+        projection=epsg_code,
+        data=data_store.path,
+        extent=extent
+    )
+    return layer
 
 def get_epsg_code(dataset):
     """
