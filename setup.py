@@ -9,7 +9,7 @@ setup(
     name='django-mapserver',
     version='0.1',
     packages=find_packages(),
-    install_requires=['django', 'mapscript', ],
+    install_requires=['django',],
     include_package_data=True,
     license='BSD License',
     description='A Django app that wraps UMN Mapserver.',
