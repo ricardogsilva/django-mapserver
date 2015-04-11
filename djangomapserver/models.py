@@ -20,6 +20,7 @@ STATUS_CHOICES = (
     (mapscript.MS_ON, "on"),
     (mapscript.MS_DEFAULT, "default")
 )
+
 SHAPEFILE_EXTENSION = 'shp'
 
 class MapObj(models.Model):
@@ -35,7 +36,7 @@ class MapObj(models.Model):
     projection = models.PositiveSmallIntegerField(
         default= 4326, help_text="EPSG code of the map projection"
     )
-    units = models.SmallIntegerField(choices=UNITS_CHOICES, blank=True)
+    units = models.SmallIntegerField(choices=UNITS_CHOICES)
     size = models.CommaSeparatedIntegerField(help_text="Map size in pixel units",
                                              max_length=10)
     cell_size = models.FloatField(help_text="Pixel size in map units.",
