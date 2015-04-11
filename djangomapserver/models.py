@@ -80,7 +80,7 @@ class MapObj(models.Model):
         m.extent = self.extent.build()
         m.setSize(*self.MAP_SIZE)
         if self.image_color is not None:
-            m.imageColor = self.image_color.build_color()
+            m.imageColor = self.image_color.build()
         else:
             m.imageColor = mapscript.colorObj(255, 255, 255)
         for layer in self.layers.all():
@@ -145,9 +145,9 @@ class LayerObj(models.Model):
         #layer.metadata.set("wcs_rangeset_name", "range 1")
         #layer.metadata.set("wcs_rangeset_label", "my label")
         layer.type = self.layer_type
-        layer.connectiontype = self.data_store.connection_type
-        layer.connection = self.data
-        layer.data = self.name
+        #layer.connectiontype = self.data_store.connection_type
+        #layer.connection = self.data
+        layer.data = self.data
         for c in self.classobj_set.all():
             layer.insertClass(c.build())
         return layer
