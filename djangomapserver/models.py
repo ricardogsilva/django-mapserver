@@ -5,8 +5,10 @@ Django models that align with MapServer's mapscript API
 # TODO - Add a geotiff datastore that is recursive, like the shapefile one
 
 import os
+import re
 
 from django.core.urlresolvers import reverse
+from django.core.exceptions import ValidationError
 from django.conf import settings
 from django.db import models
 from django.db.models.signals import post_save
@@ -225,11 +227,28 @@ class StyleObj(models.Model):
         return st
 
 
+def validate_integer_color(val):
+    """
+    Validates that an integer RGB value is between 0 and 255.
+    Prevents errors due to out of range RGB values.
+    """
+    if val < 0 or val > 255:
+        raise ValidationError(u'{} is not a valid RGB color integer value.'.format(val))
+
+def validate_hex_color(hex_str):
+    """
+    Validates an RGB hex string.
+    """
+    match_str = r'#[0-9a-fA-F]{6}'
+    if re.match(match_str, hex_str) is None:
+        raise ValidationError(u'{} is not a valid RGB hex string.'.format(hex_str))
+
+
 class MapServerColor(models.Model):
-    red = models.IntegerField(blank=True, null=True)
-    green = models.IntegerField(blank=True, null=True)
-    blue = models.IntegerField(blank=True, null=True)
-    hex_string = models.CharField(max_length=9, blank=True)
+    red = models.IntegerField(blank=True, null=True, validators=[validate_integer_color])
+    green = models.IntegerField(blank=True, null=True, validators=[validate_integer_color])
+    blue = models.IntegerField(blank=True, null=True, validators=[validate_integer_color])
+    hex_string = models.CharField(max_length=9, blank=True, validators=[validate_hex_color])
     attribute = models.CharField(max_length=255, blank=True)
 
     def build(self):
@@ -331,3 +350,4 @@ def get_epsg_code(dataset):
     while code is None and index < len(top_level_elements):
         code = srs.GetAuthorityCode(top_level_elements[index])
     return int(code)
+
