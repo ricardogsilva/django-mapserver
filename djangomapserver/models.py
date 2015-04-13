@@ -17,6 +17,8 @@ from django.contrib.gis.gdal import DataSource
 from osgeo import osr
 import mapscript
 
+import validators
+
 STATUS_CHOICES = (
     (mapscript.MS_OFF, "off"),
     (mapscript.MS_ON, "on"),
@@ -114,7 +116,7 @@ class LayerObj(models.Model):
     data = models.CharField(max_length=255, help_text="Full path to the "
                             "spatial data to process.")
     class_item = models.CharField(
-        max_length=255, 
+        max_length=255,
         help_text="Item name in attribute table to use for class lookups.",
         blank=True
     )
@@ -227,28 +229,11 @@ class StyleObj(models.Model):
         return st
 
 
-def validate_integer_color(val):
-    """
-    Validates that an integer RGB value is between 0 and 255.
-    Prevents errors due to out of range RGB values.
-    """
-    if val < 0 or val > 255:
-        raise ValidationError(u'{} is not a valid RGB color integer value.'.format(val))
-
-def validate_hex_color(hex_str):
-    """
-    Validates an RGB hex string.
-    """
-    match_str = r'#[0-9a-fA-F]{6}'
-    if re.match(match_str, hex_str) is None:
-        raise ValidationError(u'{} is not a valid RGB hex string.'.format(hex_str))
-
-
 class MapServerColor(models.Model):
-    red = models.IntegerField(blank=True, null=True, validators=[validate_integer_color])
-    green = models.IntegerField(blank=True, null=True, validators=[validate_integer_color])
-    blue = models.IntegerField(blank=True, null=True, validators=[validate_integer_color])
-    hex_string = models.CharField(max_length=9, blank=True, validators=[validate_hex_color])
+    red = models.IntegerField(blank=True, null=True, validators=[validators.validate_integer_color])
+    green = models.IntegerField(blank=True, null=True, validators=[validators.validate_integer_color])
+    blue = models.IntegerField(blank=True, null=True, validators=[validators.validate_integer_color])
+    hex_string = models.CharField(max_length=9, blank=True, validators=[validators.validate_hex_color])
     attribute = models.CharField(max_length=255, blank=True)
 
     def build(self):
@@ -267,7 +252,7 @@ class RectObj(models.Model):
     min_y = models.FloatField()
 
     def build(self):
-        return mapscript.rectObj(self.min_x, self.min_y, 
+        return mapscript.rectObj(self.min_x, self.min_y,
                                  self.max_x, self.max_y)
 
     def __unicode__(self):
@@ -295,7 +280,7 @@ def find_shapefile_layers(sender, **kwargs):
 
     for dirpath, dirnames, fnames in os.walk(kwargs['instance'].path):
         print("Analyzing {}".format(dirpath))
-        for file_ in (f for f in fnames if 
+        for file_ in (f for f in fnames if
                 os.path.splitext(f)[-1][1:] == SHAPEFILE_EXTENSION):
             print("found {}".format(file_))
             file_path = os.path.join(dirpath, file_)
