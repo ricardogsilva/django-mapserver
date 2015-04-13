@@ -5,10 +5,8 @@ Django models that align with MapServer's mapscript API
 # TODO - Add a geotiff datastore that is recursive, like the shapefile one
 
 import os
-import re
 
 from django.core.urlresolvers import reverse
-from django.core.exceptions import ValidationError
 from django.conf import settings
 from django.db import models
 from django.db.models.signals import post_save
