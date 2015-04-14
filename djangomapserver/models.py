@@ -15,11 +15,14 @@ from django.contrib.gis.gdal import DataSource
 from osgeo import osr
 import mapscript
 
+import validators
+
 STATUS_CHOICES = (
     (mapscript.MS_OFF, "off"),
     (mapscript.MS_ON, "on"),
     (mapscript.MS_DEFAULT, "default")
 )
+
 SHAPEFILE_EXTENSION = 'shp'
 
 class MapObj(models.Model):
@@ -35,7 +38,7 @@ class MapObj(models.Model):
     projection = models.PositiveSmallIntegerField(
         default= 4326, help_text="EPSG code of the map projection"
     )
-    units = models.SmallIntegerField(choices=UNITS_CHOICES, blank=True)
+    units = models.SmallIntegerField(choices=UNITS_CHOICES)
     size = models.CommaSeparatedIntegerField(help_text="Map size in pixel units",
                                              max_length=10)
     cell_size = models.FloatField(help_text="Pixel size in map units.",
@@ -79,7 +82,7 @@ class MapObj(models.Model):
         m.extent = self.extent.build()
         m.setSize(*self.MAP_SIZE)
         if self.image_color is not None:
-            m.imageColor = self.image_color.build_color()
+            m.imageColor = self.image_color.build()
         else:
             m.imageColor = mapscript.colorObj(255, 255, 255)
         for layer in self.layers.all():
@@ -111,7 +114,7 @@ class LayerObj(models.Model):
     data = models.CharField(max_length=255, help_text="Full path to the "
                             "spatial data to process.")
     class_item = models.CharField(
-        max_length=255, 
+        max_length=255,
         help_text="Item name in attribute table to use for class lookups.",
         blank=True
     )
@@ -144,9 +147,9 @@ class LayerObj(models.Model):
         #layer.metadata.set("wcs_rangeset_name", "range 1")
         #layer.metadata.set("wcs_rangeset_label", "my label")
         layer.type = self.layer_type
-        layer.connectiontype = self.data_store.connection_type
-        layer.connection = self.data
-        layer.data = self.name
+        #layer.connectiontype = self.data_store.connection_type
+        #layer.connection = self.data
+        layer.data = self.data
         for c in self.classobj_set.all():
             layer.insertClass(c.build())
         return layer
@@ -225,10 +228,10 @@ class StyleObj(models.Model):
 
 
 class MapServerColor(models.Model):
-    red = models.IntegerField(blank=True, null=True)
-    green = models.IntegerField(blank=True, null=True)
-    blue = models.IntegerField(blank=True, null=True)
-    hex_string = models.CharField(max_length=9, blank=True)
+    red = models.IntegerField(blank=True, null=True, validators=[validators.validate_integer_color])
+    green = models.IntegerField(blank=True, null=True, validators=[validators.validate_integer_color])
+    blue = models.IntegerField(blank=True, null=True, validators=[validators.validate_integer_color])
+    hex_string = models.CharField(max_length=9, blank=True, validators=[validators.validate_hex_color])
     attribute = models.CharField(max_length=255, blank=True)
 
     def build(self):
@@ -247,7 +250,7 @@ class RectObj(models.Model):
     min_y = models.FloatField()
 
     def build(self):
-        return mapscript.rectObj(self.min_x, self.min_y, 
+        return mapscript.rectObj(self.min_x, self.min_y,
                                  self.max_x, self.max_y)
 
     def __unicode__(self):
@@ -275,7 +278,7 @@ def find_shapefile_layers(sender, **kwargs):
 
     for dirpath, dirnames, fnames in os.walk(kwargs['instance'].path):
         print("Analyzing {}".format(dirpath))
-        for file_ in (f for f in fnames if 
+        for file_ in (f for f in fnames if
                 os.path.splitext(f)[-1][1:] == SHAPEFILE_EXTENSION):
             print("found {}".format(file_))
             file_path = os.path.join(dirpath, file_)
@@ -330,3 +333,4 @@ def get_epsg_code(dataset):
     while code is None and index < len(top_level_elements):
         code = srs.GetAuthorityCode(top_level_elements[index])
     return int(code)
+
