@@ -10,6 +10,10 @@ class ShapefileDataStoreAdmin(admin.ModelAdmin):
     pass
 
 
+class PostGisDataStoreAdmin(admin.ModelAdmin):
+    pass
+
+
 class RectObjAdmin(admin.ModelAdmin):
     pass
 
@@ -42,3 +46,4 @@ admin.site.register(models.LayerObj, LayerObjAdmin)
 admin.site.register(models.ClassObj, ClassObjAdmin)
 admin.site.register(models.ShapefileDataStore, ShapefileDataStoreAdmin)
 admin.site.register(models.SpatialiteDataStore, SpatialiteDataStoreAdmin)
+admin.site.register(models.PostgisDataStore, PostGisDataStoreAdmin)

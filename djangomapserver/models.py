@@ -152,6 +152,17 @@ class LayerObj(models.Model):
         layer.data = self.data
         for c in self.classobj_set.all():
             layer.insertClass(c.build())
+        # Connection stuff for PostGIS
+        if self.data_store.connection_type == mapscript.MS_POSTGIS:
+            test_dict = {
+                'host': 'localhost',
+                'database': 'mapserver',
+                'user': 'mapserver',
+                'password': 'mapserver',
+                'port': 5432
+            }
+            layer.connectiontype = mapscript.MS_POSTGIS
+            layer.connection = "host={host} dbname={database} user={user} password={password} port={port}".format(**test_dict)
         return layer
 
     def __unicode__(self):
@@ -170,14 +181,20 @@ class DataStoreBase(models.Model):
         try:
             ct = self.spatialitedatastore.connection_type
         except self.DoesNotExist:
-            ct = self.shapefiledatastore.connection_type
+            try:
+                ct = self.shapefiledatastore.connection_type
+            except self.DoesNotExist:
+                ct = self.postgisdatastore.connection_type
         return ct
 
     def __unicode__(self):
         try:
             ds = self.spatialitedatastore
         except self.DoesNotExist:
-            ds = self.shapefiledatastore
+            try:
+                ds = self.shapefiledatastore
+            except self.DoesNotExist:
+                ds = self.postgisdatastore
         return ds.__unicode__()
 
 
@@ -197,6 +214,21 @@ class ShapefileDataStore(DataStoreBase):
 
     def __unicode__(self):
         return "shapefile:{}".format(self.path)
+
+
+class PostgisDataStore(DataStoreBase):
+    database = models.CharField(max_length=255, blank=False, help_text="Database name.")
+    user = models.CharField(max_length=255, blank=False, help_text="Database user name.")
+    password = models.CharField(max_length=255, blank=False, help_text="Database user password.")
+    host = models.CharField(max_length=255, blank=False, default="localhost", help_text="Database host address.")
+    port = models.IntegerField(default=5432, blank=False, help_text="Database host listening port.")
+    connection_type = mapscript.MS_POSTGIS
+
+    def __unicode__(self):
+        return "postgis:{user}:{password}@{host}:{port}/{database}".format(**self.__dict__)
+
+    class Meta:
+        verbose_name = "PostGIS Datastore"
 
 
 class ClassObj(models.Model):
