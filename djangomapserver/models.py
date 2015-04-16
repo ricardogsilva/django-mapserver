@@ -188,13 +188,14 @@ class DataStoreBase(models.Model):
         return ct
 
     def __unicode__(self):
-        try:
+        if hasattr(self, "rasterdatastore"):
+            ds = self.rasterdatastore
+        elif hasattr(self, "shapefiledatastore"):
+            ds = self.shapefiledatastore
+        elif hasattr(self, "spatialitedatastore"):
             ds = self.spatialitedatastore
-        except self.DoesNotExist:
-            try:
-                ds = self.shapefiledatastore
-            except self.DoesNotExist:
-                ds = self.postgisdatastore
+        elif hasattr(self, "postgisdatastore"):
+            ds = self.postgisdatastore
         return ds.__unicode__()
 
 
@@ -206,6 +207,9 @@ class SpatialiteDataStore(DataStoreBase):
     def __unicode__(self):
         return "spatialite:{}".format(self.path)
 
+    class Meta:
+        verbose_name = "Spatialite Datastore"
+
 
 class ShapefileDataStore(DataStoreBase):
     path = models.CharField(max_length=255, help_text="Path to the directory "
@@ -214,6 +218,9 @@ class ShapefileDataStore(DataStoreBase):
 
     def __unicode__(self):
         return "shapefile:{}".format(self.path)
+
+    class Meta:
+        verbose_name = "Shapefile Datastore"
 
 
 class PostgisDataStore(DataStoreBase):
@@ -229,6 +236,18 @@ class PostgisDataStore(DataStoreBase):
 
     class Meta:
         verbose_name = "PostGIS Datastore"
+
+
+class RasterDataStore(DataStoreBase):
+    path = models.CharField(max_length=255, help_text="Path to the directory "
+                            "holding raster files.")
+    connection_type = None  # rasters cannot have this attribute
+
+    def __unicode__(self):
+        return "raster:{}".format(self.path)
+
+    class Meta:
+        verbose_name = "Raster Datastore"
 
 
 class ClassObj(models.Model):
@@ -308,7 +327,8 @@ def find_shapefile_layers(sender, **kwargs):
     Scan the path value of the newly created ShapefileDataStore and new layers
     """
 
-    for dirpath, dirnames, fnames in os.walk(kwargs['instance'].path):
+    instance = kwargs['instance']
+    for dirpath, dirnames, fnames in os.walk(instance.path):
         print("Analyzing {}".format(dirpath))
         for file_ in (f for f in fnames if
                 os.path.splitext(f)[-1][1:] == SHAPEFILE_EXTENSION):
@@ -316,7 +336,7 @@ def find_shapefile_layers(sender, **kwargs):
             file_path = os.path.join(dirpath, file_)
             ds = DataSource(file_path)
             ds_layer = ds[0]  # shapefiles only have one layer
-            layer = get_layer(ds_layer)
+            layer = get_layer(ds_layer, instance)
             layer.save()
 
 @receiver(post_save, sender=SpatialiteDataStore)
