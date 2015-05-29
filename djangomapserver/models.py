@@ -12,6 +12,7 @@ from django.db import models
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.contrib.gis.gdal import DataSource
+from django.contrib.sites.models import Site
 from osgeo import osr
 import mapscript
 
@@ -74,7 +75,7 @@ class MapObj(models.Model):
         m.units = self.units
         m.setMetaData("ows_title", self.name)
         m.setMetaData("ows_onlineresource",
-                      "http://{}{}".format(settings.HOST_NAME, uri))
+                      "http://{}{}".format(Site.objects.get_current().domain, uri))
         m.setMetaData("wms_srs", "EPSG:{}".format(self.projection))
         m.setMetaData("wms_enable_request", self.ows_enable_request)
         m.setMetaData("wms_encoding", "utf-8")
@@ -174,17 +175,22 @@ class MapLayer(models.Model):
     layer_obj = models.ForeignKey(LayerObj)
     status = models.SmallIntegerField(choices=STATUS_CHOICES)
 
+    def __unicode__(self):
+        return self.layer_obj.name
+
+
 class DataStoreBase(models.Model):
 
     @property
     def connection_type(self):
-        try:
+        if hasattr(self, "rasterdatastore"):
+            ct = self.rasterdatastore.connection_type
+        elif hasattr(self, "shapefiledatastore"):
+            ct = self.shapefiledatastore.connection_type
+        elif hasattr(self, "spatialitedatastore"):
             ct = self.spatialitedatastore.connection_type
-        except self.DoesNotExist:
-            try:
-                ct = self.shapefiledatastore.connection_type
-            except self.DoesNotExist:
-                ct = self.postgisdatastore.connection_type
+        elif hasattr(self, "postgisdatastore"):
+            ct = self.postgisdatastore.connection_type
         return ct
 
     def __unicode__(self):
