@@ -4,15 +4,14 @@ Some helper functions to allow Django to serve as a wrapper for MapServer.
 
 import mapscript
 
+
 def process_request(django_request, map_obj):
-    """
-    Offload the processing of the OWS request to MapServer.
+    """Offload the processing of the OWS request to MapServer.
 
     :arg django_request: the request parameters
     :type django_request: HttpRequest
     :arg map_obj: the in-memory mapfile to use
     :type map_obj: mapscript.mapObj
-
     :return: the mapserver buffer with the output from processing the request
     """
 
@@ -23,7 +22,7 @@ def process_request(django_request, map_obj):
         raise Exception
     # build the WMS request
     wms_req = mapscript.OWSRequest()
-    for k, v in params.iteritems():
+    for k, v in params.items():
         wms_req.setParameter(k, v)
 
     # install a mapserver IO handler directing future stdout to a memory buffer
@@ -41,8 +40,8 @@ def process_request(django_request, map_obj):
 
     # reset the stdin/stdout handlers
     mapscript.msIO_resetHandlers()
-
     return ms_content, ms_content_type
+
 
 def get_content_type(mapserver_output_content_type):
     result = None
